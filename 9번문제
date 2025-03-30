@@ -1,0 +1,200 @@
+import random
+import math
+
+# -------------------------
+# 1) 도시 정보 설정 (5개 예시)
+# -------------------------
+city_coords = [
+    (0, 0),   # 0번 도시
+    (2, 3),   # 1번 도시
+    (4, 0),   # 2번 도시
+    (5, 2),   # 3번 도시
+    (6, 5)    # 4번 도시
+]
+
+# -------------------------
+# 2) 거리 계산 함수
+# -------------------------
+def distance(city1, city2):
+    """
+    두 도시의 (x, y) 좌표를 이용해 유클리디안 거리 계산
+    """
+    x1, y1 = city1
+    x2, y2 = city2
+    return math.sqrt((x1 - x2)**2 + (y1 - y2)**2)
+
+# -------------------------
+# 3) 경로(염색체) 관련 함수
+# -------------------------
+def route_distance(route, city_coords):
+    """
+    route: [0, 3, 4, 2, 1, 0]처럼 도시 방문 순서가 들어있음
+    city_coords: 도시들의 좌표 리스트
+    """
+    dist = 0
+    for i in range(len(route) - 1):
+        current_city_idx = route[i]
+        next_city_idx = route[i+1]
+        dist += distance(city_coords[current_city_idx], city_coords[next_city_idx])
+    return dist
+
+def create_route(num_cities):
+    """
+    0 ~ num_cities-1 중 임의 순서를 만들고,
+    시작점을 다시 끝에 붙여(순환 경로) 경로(염색체)를 생성
+    """
+    route = random.sample(range(num_cities), num_cities)
+    route.append(route[0])  # 시작점을 끝에 붙여 순환 경로 생성
+    return route
+
+def initial_population(pop_size, num_cities):
+    """
+    pop_size만큼 랜덤 경로(염색체)를 생성하여 초기 집단을 구성
+    """
+    population = []
+    for _ in range(pop_size):
+        population.append(create_route(num_cities))
+    return population
+
+# -------------------------
+# 4) 적합도(Fitness) 계산 함수
+# -------------------------
+def fitness(route, city_coords):
+    """
+    경로 거리의 역수를 적합도로 사용(거리가 짧을수록 적합도 높음)
+    """
+    dist = route_distance(route, city_coords)
+    return 1 / dist
+
+# -------------------------
+# 5) 선택(Selection) 함수
+# -------------------------
+def selection(population, city_coords):
+    """
+    룰렛휠 방식으로 구현 예시
+    - 전체 개체의 적합도 합을 구하고
+    - 랜덤 값을 뽑아 그에 해당하는 개체를 선택
+    """
+    fitness_sum = sum(fitness(route, city_coords) for route in population)
+    pick = random.random() * fitness_sum
+    
+    current = 0
+    for route in population:
+        current += fitness(route, city_coords)
+        if current > pick:
+            return route
+    return population[-1]
+
+# -------------------------
+# 6) 교차(Crossover) 함수
+# -------------------------
+def crossover(parent1, parent2):
+    parent1_middle = parent1[1:-1]
+    parent2_middle = parent2[1:-1]
+    length = len(parent1_middle)
+
+    # 혹시 도시 수가 너무 적으면 그대로 반환(또는 다른 간단 처리)
+    if length < 2:
+        return parent1[:]
+
+    # 교차 구간을 start, end 무작위로 뽑은 뒤 정렬
+    start = random.randint(0, length - 1)
+    end = random.randint(0, length - 1)
+    if start > end:
+        start, end = end, start
+
+    child_middle = [None] * length
+    # parent1 교차 구간 복사
+    child_middle[start:end+1] = parent1_middle[start:end+1]
+
+    # parent2에서 중복되지 않은 도시를 None 자리 채워넣기
+    pointer = 0
+    for city in parent2_middle:
+        if city not in child_middle:
+            while pointer < length and child_middle[pointer] is not None:
+                pointer += 1
+            if pointer < length:
+                child_middle[pointer] = city
+            else:
+                # 남은 슬롯이 없는데 도시가 남았다면 로직상 뭔가 꼬인 경우
+                # break 또는 예외처리
+                break
+
+    # 시작점·끝점 고정
+    return [0] + child_middle + [0]
+
+
+# -------------------------
+# 7) 돌연변이(Mutation) 함수
+# -------------------------
+def mutate(route, mutation_rate=0.01):
+    """
+    mutation_rate 확률로 서로 다른 두 위치의 도시를 교환
+    시작점과 끝점(0)은 고정한다고 가정
+    """
+    for i in range(1, len(route) - 1):
+        if random.random() < mutation_rate:
+            j = random.randint(1, len(route) - 2)
+            route[i], route[j] = route[j], route[i]
+    return route
+
+# -------------------------
+# 8) 다음 세대(population) 생성
+# -------------------------
+def create_next_generation(current_pop, city_coords, elite_size=2, mutation_rate=0.01):
+    # 우선 현재 집단을 적합도 순으로 정렬
+    ranked_pop = sorted(current_pop, key=lambda r: fitness(r, city_coords), reverse=True)
+    
+    # 엘리트 개체는 그대로 다음 세대로 보존
+    next_gen = ranked_pop[:elite_size]
+    
+    # 나머지는 선택-교차-돌연변이 과정을 거쳐 생성
+    for _ in range(len(current_pop) - elite_size):
+        parent1 = selection(ranked_pop, city_coords)
+        parent2 = selection(ranked_pop, city_coords)
+        child = crossover(parent1, parent2)
+        child = mutate(child, mutation_rate)
+        next_gen.append(child)
+    
+    return next_gen
+
+# -------------------------
+# 9) 메인: GA 실행 루프
+# -------------------------
+def genetic_algorithm(
+    city_coords, 
+    pop_size=20, 
+    elite_size=2, 
+    mutation_rate=0.01, 
+    generations=100
+):
+    # 초기 집단 생성
+    population = initial_population(pop_size, len(city_coords))
+    
+    # 세대 반복
+    for gen in range(generations):
+        population = create_next_generation(population, city_coords, elite_size, mutation_rate)
+        
+        # 매 세대마다 최적해(또는 최적해 후보)를 출력해보고 싶다면:
+        best_route = min(population, key=lambda r: route_distance(r, city_coords))
+        best_dist = route_distance(best_route, city_coords)
+        if (gen+1) % 10 == 0:
+            print(f"Generation {gen+1} | Best distance = {best_dist:.3f} | Route = {best_route}")
+    
+    # 최종 세대에서 최적해 반환
+    best_route = min(population, key=lambda r: route_distance(r, city_coords))
+    return best_route
+
+# -------------------------
+# 실행 예시
+# -------------------------
+if __name__ == "__main__":
+    best = genetic_algorithm(
+        city_coords,
+        pop_size=30,        # 초기 개체 수
+        elite_size=2,       # 엘리트 보존 개체 수
+        mutation_rate=0.02, # 돌연변이 확률
+        generations=200     # 세대 수
+    )
+    print("\n최적(추정) 경로:", best)
+    print("최단 거리:", route_distance(best, city_coords))
